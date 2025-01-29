@@ -1,0 +1,17 @@
+This is a slightly modified version of https://github.com/esromerog/LSLWebsocketMirror
+TODO: Bring this into a proper format where it can be pushed/commited
+
+Issues with YQ/Websocket Streamer:
+
+- crashes (?) for null samples. Fixed by doing samples = list(np.nan_to_num(np.array(samples))) in lslmirror.py
+- doesnt work for irregular srates (fixed, changed a few files)
+- crashes when streams lose connection (fixed by simply wrapping around try/catch)
+
+
+Minor issues:
+
+- code<->visual slider dragging is bugged in firefox
+- when lsl stream connection is lost and re-gained, they have to be completely reassigned (in data mapping and data stream selection)
+- (overall annoying to require re-setting of data mappings every time, especially for many channels)
+- fullscreen button doesnt do anything
+- lsl streams only recognized after the first packet is sent

@@ -1,0 +1,4 @@
+These are the necessary pupil capture plugins for the project
+TODO: Properly credit the files
+Most of these are directly from the pupil labs github, the others are modified files of the LSL relay plugin
+They have been modified to include more events like fixations, surface events...

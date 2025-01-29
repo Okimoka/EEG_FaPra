@@ -1,0 +1,51 @@
+name: SurfaceGaze_0
+id: surface_gaze_id_0
+srate: 200 Hz
+    - Surface Gaze X
+    - Surface Gaze Y
+    - Blink counter
+
+name: UnicornEEG_Filtered
+id: unicorn_filtered
+srate: 250 Hz
+    - Fz
+    - C3
+    - Cz
+    - C4
+    - Pz
+    - PO7
+    - OZ
+    - PO8
+
+name: UnicornEEG_Power
+id: unicorn_power
+srate: 250 Hz
+    - Delta
+    - Theta
+    - Alpha
+    - Beta
+
+name: ccs-neon-001_Neon Gaze
+id: 051fe86e470c7413
+srate: 200 Hz
+    'x' (ScreenX in image-space coordinate system)
+    'y' (ScreenY in image-space coordinate system)
+    'PupilDiameter' (left eye, camera-space)
+    'EyeballCenterX'
+    'EyeballCenterY'
+    'EyeballCenterZ'
+    'OpticalAxisX'
+    'OpticalAxisY'
+    'OpticalAxisZ'
+    'PupilDiameter' (right eye, camera-space)
+    'EyeballCenterX'
+    'EyeballCenterY'
+    'EyeballCenterZ'
+    'OpticalAxisX'
+    'OpticalAxisY'
+    'OpticalAxisZ'
+
+name: ccs-neon-001_Neon Events
+id: 051fe86e470c7413
+srate: 0 Hz
+(empty for all our purposes)
