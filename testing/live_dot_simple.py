@@ -7,11 +7,12 @@ from pylsl import StreamInlet, resolve_byprop, resolve_streams
 import sys
 import time
 import threading
-
-
+import nest_asyncio
+from pupil_labs.realtime_api.simple import discover_one_device, discover_devices
+from pupil_labs.real_time_screen_gaze.gaze_mapper import GazeMapper
 
 class Markers:
-    def __init__(self, pixelSizeArucos=24, border=32, screen_width=1920, screen_height=1080):
+    def __init__(self, pixelSizeArucos=24, border=32, screen_width=1800, screen_height=900):
         #predefined apriltags from pupil website
         arucos = [[0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,1,1,0,1,0,0,0,0,0,0,1,0,1,0,0,0,0,0,1,1,0,0,0,1,0,1,1,1,0,0,0,1,0,1,0,1,1,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,1,0,0,1,0,0,0,0,1,0,1,1,0,1,0,0,0,0,0,1,1,0,0,0,0,0,1,1,1,1,0,0,1,1,1,0,1,0,0,0,0,1,1,0,1,1,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,1,1,1,0,0,0,0,0,0,1,0,0,0,0,0,1,0,0,1,0,0,0,0,0,0,0,0,0,1,0,0,0,1,0,0,1,0,0,0,1,1,1,0,1,1,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,1,0,0,1,1,0,0,1,0,0,1,0,1,0,0,1,1,1,0,0,1,0,0,1,1,1,0,0,0,0,0,1,0,0,1,1,1,0,0,0,0,0,0,0,0,0]]
         arucos = [np.array(arucos[i], dtype=np.uint8).reshape(8, 8) * 255 for i in range(4)]
@@ -37,40 +38,6 @@ class Markers:
             screen.blit(surf, pos)
 
 
-class LSLStream:
-    def __init__(self, name, track_history_seconds=0):
-        self.streams = None
-        self.inlet = None
-        self.sampling_rate = None
-        self.max_history_length = None
-        self.history = []
-        self.track_history_seconds = track_history_seconds
-        self.latest_sample = (0, 0)
-
-        all_streams = resolve_streams()
-        if name in [stream.name() for stream in all_streams]:
-            self.streams = resolve_byprop('name', name)
-            self.inlet = StreamInlet(self.streams[0])
-            self.sampling_rate = self.inlet.info().nominal_srate()
-            self.max_history_length = int(self.sampling_rate * self.track_history_seconds)
-            print("Connected to stream: " + name)
-            self.running = True
-            self.thread = threading.Thread(target=self.stream_listener, daemon=True)
-            self.thread.start()
-        else:
-            print("Stream " + name + " not found.")
-
-    def stream_listener(self):
-        """Background thread to pull the latest LSL sample continuously."""
-        while self.running:
-            sample, timestamp = self.inlet.pull_sample(timeout=0.01)
-            if sample:
-                self.latest_sample = (timestamp, sample)
-
-    def pull_sample(self):
-        """Simply returns the latest available sample (non-blocking)."""
-        return self.latest_sample
-
 
 class Painter:
     def __init__(self, game, markers):
@@ -80,19 +47,81 @@ class Painter:
         self.alpha = 0.2  # Smoothing factor
         self.prev_x = None
         self.prev_y = None
-        self.gaze_points = []
+  
+        self.newest_sample = []
 
-        #stream_names = ["ccs-neon-001_Neon Gaze", "Fixations"]
-        stream_names = ["SurfaceGaze_0"]
-        
-        self.streams = {}
-        for stream_name in stream_names:
-            self.streams[stream_name] = LSLStream(stream_name, 0)
+
+
+        nest_asyncio.apply()
+        self.device = discover_one_device()
+        calibration = self.device.get_calibration()
+        self.gaze_mapper = GazeMapper(calibration)
+
+        scale = 24
+        margin = 32
+        screen_width = 1800
+        screen_height = 900
+        image_width = scale * 8  # 8x8 pixels scaled by 'scale'
+        image_height = scale * 8
+
+        marker_verts = {
+            0: [  # top left
+                (margin, margin),  # Top left corner of the top-left image
+                (margin + image_width, margin),  # Top right corner of the top-left image
+                (margin + image_width, margin + image_height),  # Bottom right corner of the top-left image
+                (margin, margin + image_height),  # Bottom left corner of the top-left image
+            ],
+            1: [  # top right
+                (screen_width - margin - image_width, margin),  # Top left corner of the top-right image
+                (screen_width - margin, margin),  # Top right corner of the top-right image
+                (screen_width - margin, margin + image_height),  # Bottom right corner of the top-right image
+                (screen_width - margin - image_width, margin + image_height),  # Bottom left corner of the top-right image
+            ],
+            2: [  # bottom left
+                (margin, screen_height - margin - image_height),  # Top left corner of the bottom-left image
+                (margin + image_width, screen_height - margin - image_height),  # Top right corner of the bottom-left image
+                (margin + image_width, screen_height - margin),  # Bottom right corner of the bottom-left image
+                (margin, screen_height - margin),  # Bottom left corner of the bottom-left image
+            ],
+            3: [  # bottom right
+                (screen_width - margin - image_width, screen_height - margin - image_height),  # Top left corner of the bottom-right image
+                (screen_width - margin, screen_height - margin - image_height),  # Top right corner of the bottom-right image
+                (screen_width - margin, screen_height - margin),  # Bottom right corner of the bottom-right image
+                (screen_width - margin - image_width, screen_height - margin),  # Bottom left corner of the bottom-right image
+            ],
+        }
+
+        screen_size = (1800, 900)
+
+        self.screen_surface = self.gaze_mapper.add_surface(
+            marker_verts,
+            screen_size
+        )
+
+
+
+
+
+
+
 
     def draw(self):
+
+
+        frame, gaze = self.device.receive_matched_scene_video_frame_and_gaze()
+        result = self.gaze_mapper.process_frame(frame, gaze)
+
+        for surface_gaze in result.mapped_gaze[self.screen_surface.uid]:
+            self.newest_sample = [surface_gaze.x, surface_gaze.y]
+            print(surface_gaze.x, surface_gaze.y)
+
         self.game.screen.fill((255, 255, 255))
         self.markers.draw(self.game.screen)
         self.draw_gaze_point()
+
+
+
+
 
 
     def draw_gaze_point(self):
@@ -105,7 +134,6 @@ class Painter:
             ##    print("Stream name:", streamm.name())
 
             #sample = self.streams['ccs-neon-001_Neon Gaze'].pull_sample()
-            timestamp2, sample = self.streams['SurfaceGaze_0'].pull_sample()
             #TODO
             #During testing (replaying from xdf), this gap seems to constantly grow
             #Does this also happen during regular recording?
@@ -114,15 +142,10 @@ class Painter:
             #print(fixationstate)
             color = (255, 0, 0)
 
-            if sample:
-                #gaze_x = sample[0]
-                #gaze_y = sample[1]
-                
-                #gaze_x = int(sample[0] * self.game.screen_width)
-                #gaze_y = int((1 - sample[1]) * self.game.screen_height)
+            if self.newest_sample:
 
-                gaze_x = int((1-sample[0]) * self.game.screen_width)
-                gaze_y = int(sample[1] * self.game.screen_height)
+                gaze_x = int((1-self.newest_sample[0]) * self.game.screen_width)
+                gaze_y = int(self.newest_sample[1] * self.game.screen_height)
 
                 #print(gaze_x, gaze_y)
 
@@ -132,19 +155,9 @@ class Painter:
                 else:
                     smoothed_x, smoothed_y = gaze_x, gaze_y
 
-                distance_to_last_point = 0
-                try:
-                    distance_to_last_point = ((smoothed_x - self.prev_x) ** 2 + (smoothed_y - self.prev_y) ** 2) ** 0.5
-                    #print(distance_to_last_point)
-                except:
-                    pass
-                    #print("Error")
                 
                 self.prev_x, self.prev_y = smoothed_x, smoothed_y
 
-
-                
-                self.gaze_points.append((int(smoothed_x), int(smoothed_y)))
 
                 pygame.draw.circle(self.game.screen, color, (int(smoothed_x), int(smoothed_y)), 10)
 
@@ -156,7 +169,7 @@ class Painter:
 
 
 class Game:
-    def __init__(self, screen_width=1920, screen_height=1080):
+    def __init__(self, screen_width=1800, screen_height=900):
         #screen
         self.screen_width = screen_width
         self.screen_height = screen_height
