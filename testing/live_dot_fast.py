@@ -45,13 +45,11 @@ class Painter:
         self.game = game
         self.markers = markers
 
-        self.alpha = 0.2  # Smoothing factor
+        self.alpha = 0.2  #smoothing factor
         self.prev_x = None
         self.prev_y = None
   
         self.newest_sample = []
-
-
 
         nest_asyncio.apply()
         self.device = discover_one_device()
@@ -103,17 +101,15 @@ class Painter:
         self.thread = threading.Thread(target=self.start_async_loop, daemon=True)
         self.thread.start()
 
-        # Start async gaze processing
+        #async gaze processing
         asyncio.run_coroutine_threadsafe(self.update_gaze_data(), self.loop)
 
 
     def start_async_loop(self):
-        """Runs the asyncio event loop in a separate thread."""
         asyncio.set_event_loop(self.loop)
         self.loop.run_forever()
 
     async def update_gaze_data(self):
-        """Asynchronously fetch gaze data and process it."""
         while True:
             frame, gaze = await asyncio.to_thread(self.device.receive_matched_scene_video_frame_and_gaze)
             result = await asyncio.to_thread(self.gaze_mapper.process_frame, frame, gaze)
@@ -121,7 +117,7 @@ class Painter:
             for surface_gaze in result.mapped_gaze[self.screen_surface.uid]:
                 self.newest_sample = [surface_gaze.x, surface_gaze.y]
             
-            await asyncio.sleep(0.001)  # Yield control briefly to prevent blocking
+            await asyncio.sleep(0.001) #to prevent blocking
 
 
     def draw(self):
@@ -155,7 +151,7 @@ class Game:
         self.screen_height = screen_height
         self.screen = pygame.display.set_mode((screen_width, screen_height))
         self.screen.fill((255, 255, 255))
-        pygame.display.set_caption('EEG Eye-Tracking Painter')
+        pygame.display.set_caption('live dot')
         markers = Markers(screen_width=screen_width, screen_height=screen_height)
         self.painter = Painter(self, markers)
 
@@ -168,8 +164,8 @@ class Game:
                 if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
                     running = False
             self.painter.draw()
-            pygame.display.update()  # More efficient than flip()
-            clock.tick(60)  # Maintain consistent FPS
+            pygame.display.update()
+            clock.tick(60)
         pygame.quit()
         sys.exit()
 
