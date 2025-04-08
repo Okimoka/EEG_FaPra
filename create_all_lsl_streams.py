@@ -3,140 +3,93 @@ logging.basicConfig(level=logging.WARNING)
 from multiprocessing import Process, Queue
 import time
 from flask import jsonify, request
-import threading
+import argparse
 
 from eeg_streamer import EEGStreamer
 from fixations_streamer import FixationsStreamer
 from flask_server import FlaskServer
-from surface_blinks_streamer import SurfaceBlinksStreamer
 from saccade_amplitude_streamer import SaccadeStreamer
 from unfold_analyzer import UnfoldAnalyzer
-from fake_eeg_streamer import FakeEEGStreamer
+from surface_blinks_streamer import SurfaceBlinksStreamer
 
 
-# Turn off logging
+# Turn off all loggers
 for logger in logging.Logger.manager.loggerDict.values():
     if isinstance(logger, logging.Logger):
         logger.setLevel(logging.WARNING)
 
 
-"""
-Directly from the Companion App
-- ccs-neon-001_Neon Gaze
-- ccs-neon-001_Neon Events
-
-EEG streamer
-- UnicornEEG_Filtered
-- UnicornEEG_Power
-
-Surface Streamer
-- SurfaceGaze_0
-
-Blink Streamer
-- blinks
-
-Fixation Streamer
-- fixations
-"""
-
-DEBUG_MODE = True
-PLOT_UNFOLD_LOCALLY = True
-
-# These three are not used, but could allow for sending data from YouQuantified to the Flask Server via POST
-def example_post_event_handler():
-    print("Event received")
-
-def example_event_function():
-    print("Received event")
-    data = request.json
-    return jsonify({"status": "success"})
-
-def example_init_function():
-    print("Server initialized")
-
-
-data_queue = Queue()
-unfold_analyzer = UnfoldAnalyzer(data_queue, PLOT_UNFOLD_LOCALLY)
-unfold_analyzer.init_julia()
-
-
-def saccade_event(amplitude):
-    if(unfold_analyzer.connected):
-        unfold_analyzer.add_saccade(amplitude)
-
-
-def start_flask_server(queue):
-    server = FlaskServer(example_post_event_handler, example_event_function, example_init_function)
-    server.initialize()
-    server.set_queue(queue)  # store the queue in your class
-    server.start()
-
+parser = argparse.ArgumentParser()
+parser.add_argument('--debug', type=bool, default=False, help='When replaying from .xdf')
+parser.add_argument('--plot-gaze', type=bool, default=False, help='Live plot of the gaze angles and fixation state')
+parser.add_argument('--plot-unfold', type=bool, default=False, help='Live plot of the Unfold.jl model results')
+#parser.add_argument('--plot-eeg', type=bool, default=False, help='Live plot of the eeg channels') TODO
+args = parser.parse_args()
 
 
 if __name__ == "__main__":
+
+    # Initialization of the UnfoldAnalyzer class
+    # Unfold results queue is a shared queue allowing communication between the UnfoldAnalyzer class (pushes results of Unfold.jl into queue)
+    # and the Flask server (emits these results into a websocket)
+    unfold_results_queue = Queue()
+    unfold_analyzer = UnfoldAnalyzer(unfold_results_queue, args.plot_unfold)
+    # init_julia has to be the first function of main, as it causes some lag that might impact the timings of other streams
+    # it also needs to be called from the main thread, as otherwise the import of modules will fail
+    unfold_analyzer.init_julia() 
+
+
+    def start_flask_server(queue):
+        server = FlaskServer()
+        server.initialize()
+        server.set_queue(queue)
+        server.start()
     
-    flask_process = Process(target=start_flask_server, args=(data_queue,))
+    # Flask server needs a separate process in order to be non-blocking
+    flask_process = Process(target=start_flask_server, args=(unfold_results_queue,))
     flask_process.start()
 
-
-
-    # Requires ccs-neon-001_Neon Gaze
-    #Creates Fixations = [binaryFixation]
     fixations_streamer = FixationsStreamer(draw_plot=True)
     fixations_streamer.initialize()
     if fixations_streamer.connected:
         fixations_streamer.start()
 
-    ## Requires device.receive_matched_scene_video_frame_and_gaze()
-    #####Creates SurfaceGaze_0  =  [x,y,blinks]
-    ##surface_blinks_streamer = SurfaceBlinksStreamer()
-    ##surface_blinks_streamer.initialize()
-    ##if surface_blinks_streamer.connected:
-    ##    surface_blinks_streamer.start()
+    # SurfaceBlinksStreamer cannot be simulated using an .xdf, as it requires a connection to the actual device
+    if(not args.debug):
+        surface_blinks_streamer = SurfaceBlinksStreamer()
+        surface_blinks_streamer.initialize()
+        if surface_blinks_streamer.connected:
+            surface_blinks_streamer.start()
 
-    #Requires SurfaceGaze_0 and Fixations
-    #Creates Saccades = [saccade_amplitude]
+
+    def saccade_event(amplitude):
+        if(unfold_analyzer.connected):
+            unfold_analyzer.add_saccade(amplitude)
+
+
     saccade_streamer = SaccadeStreamer(callback=saccade_event, amplitude_method="angle") #angle or surface
     saccade_streamer.initialize()
     if saccade_streamer.connected:
         saccade_streamer.start()
     
 
-    if(DEBUG_MODE):
-        #Replaying from xdf
-        fake_eeg_streamer = FakeEEGStreamer()
-        fake_eeg_streamer.initialize()
-        if fake_eeg_streamer.connected:
-            fake_eeg_streamer.start()
-    else:
-        #Using real device
-        fake_eeg_streamer = EEGStreamer()
-        fake_eeg_streamer.initialize()
-        if fake_eeg_streamer.connected:
-            fake_eeg_streamer.start()
-        print("eeg_streamer started")
+    eeg_streamer = EEGStreamer()
+    eeg_streamer.initialize()
+    if eeg_streamer.connected:
+        eeg_streamer.start()
 
 
-
-
-    unfold_analyzer.initialize(DEBUG_MODE)
+    unfold_analyzer.initialize(args.debug)
     if unfold_analyzer.connected:
-        print("Started")
         unfold_analyzer.start()
 
-    
-
-
+    # juliacall functions have to be called from the main loop
     try:
         while True:
-            current_time = time.time()
             if(unfold_analyzer.data_ready):
                 unfold_analyzer.data_ready = False
-                print("Data ready")
-                #threading.Thread(target=unfold_analyzer.live_fit_and_plot(), daemon=True).start()
-                unfold_analyzer.live_fit_and_plot()
-                
-            time.sleep(0.1)  # Adjust for real-time monitoring
+                unfold_analyzer.live_fit_and_plot() # Putting this in a thread unfortunately does not work. Subprocess probably works
+            time.sleep(0.1)
     except KeyboardInterrupt:
         print("Shutting down all services.")
 

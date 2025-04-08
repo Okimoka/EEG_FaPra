@@ -1,23 +1,22 @@
-#from pupil_labs.real_time_screen_gaze import marker_generator
 import random
 from matplotlib import pyplot as plt
 import numpy as np
 import threading
-
+import pandas as pd
+import time
 
 from juliacall import Pkg as jlPkg
 from juliacall import Main as jl
-import time
-from pylsl import StreamInfo, StreamOutlet
 
-from mne.datasets.limo import load_data
-import pandas as pd
-import seaborn as sns
-import matplotlib.pyplot as plt
-
-from lsl_stream import LSLStream
 from streamer import Streamer
-from live_visualization import Plotter
+from plotter import Plotter
+
+"""
+
+TODO comment this class
+
+"""
+
 
 
 class UnfoldAnalyzer(Streamer, Plotter):
@@ -55,40 +54,14 @@ class UnfoldAnalyzer(Streamer, Plotter):
         else:
             super().initialize("UnicornEEG_Filtered", "ccs-neon-001_Neon Gaze", None)
 
-        """
-        if(PLOT_UNFOLD_LOCALLY):
-            self.data_ready = False
-            self.x_data = []
-            self.y_data = []
-            self.y_data2 = []
-
-            plt.ion()  # Turn on interactive mode
-            self.fig, self.ax = plt.subplots()
-            self.line, = self.ax.plot([], [], 'b-')  # Blue line
-            #self.ax.set_xlim(0, 10)
-            #self.ax.set_ylim(-1, 1)
-
-            self.lock = threading.Lock()
-        """
-
-        #self.fixations_stream = LSLStream("Fixations", track_history_seconds=3.0) #binary fixation
-        #self.input_stream_1 = LSLStream("UnicornEEG_Filtered", track_history_seconds=3.0) #8 channel eeg data
-        ###self.input_stream_1 = LSLStream("FakeEEG", track_history_seconds=3.0) #8 channel eeg data
-        #self.saccade_stream = LSLStream("Saccades", track_history_seconds=3.0) #most recent saccade amplitude
-        ###self.pupil_stream = LSLStream("ccs-neon-001_Neon Gaze", track_history_seconds=3.0) #pupil size
-
-        ###self.outlet = StreamOutlet(StreamInfo('Unfold', 'Markers', 2, 20, 'float32', 'fixation_outlet'))
-
-        #self.connected = self.fixations_stream.connected and self.input_stream_1.connected and self.saccade_stream.connected
-        ###self.connected = self.input_stream_1.connected
-
-
 
     def start(self):
+        # The saccade amplitude lsl stream is not really needed, instead the callback from saccade_amplitude_streamer is used
         Streamer.start(self, pull_1=True, print_lag_1=True)
 
         if(self.plot_unfold_locally):
             Plotter.start(self)
+        
         # All pulls need to be in separate threads, or else we get drifting timestamps
         #threading.Thread(target=self.lsl_pull_thread, args=(self.fixations_stream, "Gaze    "), daemon=True).start()
         ###threading.Thread(target=self.lsl_pull_thread, args=(self.input_stream_1, "EEG     "), daemon=True).start()
@@ -174,11 +147,7 @@ class UnfoldAnalyzer(Streamer, Plotter):
         })
     
 
-    #def plot_channel_coef(results_py, channel_id):
-    #    df = results_py[results_py.channel == channel_id]
-    #    ax = sns.lineplot(data=df, x='time', y='estimate', hue='coefname')
-    #    ax.set(title=f'Channel {channel_id}', xlabel='Time [s]', ylabel='Beta Coefficient')
-    #    plt.show()
+
 
     def live_fit_and_plot(self):
 
@@ -206,6 +175,7 @@ class UnfoldAnalyzer(Streamer, Plotter):
             'time': results_jl.time
         })
 
+        # Sample output
         #    channel           coefname   estimate  time
         #0           1        (Intercept)  -0.055425  -0.2
         #1           2        (Intercept)  -0.371453  -0.2
@@ -219,11 +189,9 @@ class UnfoldAnalyzer(Streamer, Plotter):
         #3550        7  saccade_amplitude   4.530100   0.8
         #3551        8  saccade_amplitude   2.348762   0.8
 
-        #print(results_py)
-        #channels: 2, 6,
+
         if(self.plot_unfold_locally):
             self.data_buffer = results_py[results_py.channel == 2]
-            #self.plot_channel(results_py, 1)
         else:
             self.emit_model_results_to_js(results_py, 1)
         
@@ -247,17 +215,3 @@ class UnfoldAnalyzer(Streamer, Plotter):
 
         #data queue of the flask websocket
         self.data_queue.put(payload)
-
-    #def plot_channel(self, results_py, channel_id):
-
-
-    def update_plot(self):
-        self.line.set_xdata(self.x_data)
-        self.line.set_ydata(self.y_data)
-
-        # Update plot limits dynamically if needed
-        self.ax.relim()
-        self.ax.autoscale_view()
-
-        self.fig.canvas.draw()
-        self.fig.canvas.flush_events()

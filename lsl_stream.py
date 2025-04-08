@@ -1,5 +1,12 @@
 from pylsl import StreamInlet, resolve_byprop, resolve_streams
 
+"""
+Used in streamer.py
+
+Class built around LSL StreamInlets that allows keeping a buffer of the most recent samples within a given time window
+"""
+
+
 class LSLStream:
     def __init__(self, name, track_history_seconds=0):
 
@@ -22,8 +29,35 @@ class LSLStream:
         
     def clear_history_to_index(self, index):
         self.history = self.history[index:]
-
     
+
+    def pull_chunk(self):
+        try:
+            chunk, timestamps = self.inlet.pull_chunk()
+
+            # Bad hard coded solution
+            # Currently, the only interesting channels for us are the gaze angles (x,y,z) to calculate Fixations
+            if(self.name == "ccs-neon-001_Neon Gaze"):
+                chunk = [sample[6:9] for sample in chunk]
+            
+            if chunk:
+                if self.track_history_seconds > 0:
+                    self.history.extend(zip(timestamps, chunk))
+                    # Remove samples that are older than the specified track_history_seconds
+                    while self.history and (timestamps[-1] - self.history[0][0]) > self.track_history_seconds:
+                        self.history.pop(0)
+                return timestamps, chunk
+            else:
+                #print("Stream "+ self.name +" is not sending data!")
+                return ([],[[]])
+        except Exception as e:
+            #print(e)
+            print("Warning: Pulling chunk from "+ self.name +" failed")
+            return ([],[[]])
+
+
+    #Unused. Pull chunk is more efficient
+    """
     def pull_sample(self):
 
         sample, timestamp = self.inlet.pull_sample(timeout=0.5)
@@ -54,27 +88,4 @@ class LSLStream:
         else:
             #print("Stream "+ self.name +" is not sending data!")
             return (0,[0])
-    
-    #Pulling chunks should be more efficient
-    def pull_chunk(self):
-        try:
-            chunk, timestamps = self.inlet.pull_chunk()
-
-            if(self.name == "ccs-neon-001_Neon Gaze"):
-                chunk = [sample[6:9] for sample in chunk]
-            
-            if chunk:
-                if self.track_history_seconds > 0:
-                    self.history.extend(zip(timestamps, chunk))
-                    # Remove samples that are older than the specified track_history_seconds
-                    while self.history and (timestamps[-1] - self.history[0][0]) > self.track_history_seconds:
-                        self.history.pop(0)
-                return timestamps, chunk
-            else:
-                #print("Stream "+ self.name +" is not sending data!")
-                return ([],[[]])
-        except Exception as e:
-            #print(e) Todo
-            print("Warning: Pulling chunk from "+ self.name +" failed")
-            return ([],[[]])
-
+    """

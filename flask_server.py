@@ -10,14 +10,15 @@ import time
 Opens a Flask server on port 5000 to allow for communication with YouQuantified
 """
 
+
 class FlaskServer:
-    def __init__(self, post_event_handler, event_function, init_function):
+    # These three input functions are not used, but could allow for sending data from YouQuantified to the Flask Server via POST
+    def __init__(self, post_event_handler=None, event_function=None, init_function=None):
         self.app = Flask(__name__, static_folder='static')
         # Need to set CORS policy so we don't get blocked
         CORS(self.app)
         # Setup Websocket
         # We need to use subprocesses, since socketio needs to run on a main thread and needs to be non-blocking
-        # Handling of the subprocess has been offset to main.py, to keep this class closer to the init/start.. paradigm
         self.socketio = SocketIO(self.app, cors_allowed_origins="*", async_mode='threading')
         # Unused right now, for POST requests
         self.data_ready = threading.Event()
@@ -37,7 +38,8 @@ class FlaskServer:
         return send_from_directory('static', path)
 
     def initialize(self):
-        self.init_function()
+        if(callable(self.init_function)):
+            self.init_function()
 
     def start(self):
         #Listen for POST events
@@ -65,6 +67,8 @@ class FlaskServer:
     def set_queue(self, queue):
         self.queue = queue
 
+    # This is the queue that is shared between UnfoldAnalyzer.
+    # As soon as UnfoldAnalyzer pushes something in the queue, this function emits it to the websocket
     def push_data(self):
         while True:
             if self.queue and not self.queue.empty():

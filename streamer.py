@@ -2,6 +2,12 @@ import threading
 import time
 from lsl_stream import LSLStream
 
+"""
+Parent class for SaccadeStreamer, FixationsStreamer, SurfaceBlinksStreamer, UnfoldAnalyzer
+
+TODO comment this class
+
+"""
 
 class Streamer:
 
@@ -18,13 +24,9 @@ class Streamer:
             timestamps, samples = stream.pull_chunk()
             for ts in timestamps:
                 if(print_lag and int(time.time() - ts) > 0):
-                    #this should only lag in debugging anyway
+                    #this will only lag in debug mode
                     if(stream.name != "ccs-neon-001_Neon Gaze"):
                         print(f"[{stream.name.ljust(15)}] Lag:", int(time.time() - ts), " n samples: " + str(len(samples)))
-
-            #ts, sample = stream.pull_sample()
-            #if(label != None and int(time.time() - ts) > 0):
-            #    print(f"[{label}] Lag:", int(time.time() - ts))
 
             time.sleep(1/self.sampling_rate)
 

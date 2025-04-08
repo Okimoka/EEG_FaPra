@@ -25,9 +25,12 @@ from streamer import Streamer
 
 """
 Requires connection to the Neon Companion App
-Produces SurfaceGaze_0 LSL strea, which has samples [x,y,blink_count]
-x,y are in [0,1] and describe the position in relation to the aruco markers on screen
-blink_count is the amount of blinks since the stream is running
+Produces SurfaceGaze_0 LSL stream, which has samples of shape [x,y,blink_count]
+x,y are in interval [0,1] and describe the position in relation to the aruco markers on screen
+blink_count is the amount of blinks since the stream start
+
+TODO comment this class
+
 """
 
 
