@@ -3,7 +3,7 @@ logging.basicConfig(level=logging.WARNING)
 from multiprocessing import Process, Queue
 import time
 from flask import jsonify, request
-
+import threading
 
 from eeg_streamer import EEGStreamer
 from fixations_streamer import FixationsStreamer
@@ -21,7 +21,6 @@ for logger in logging.Logger.manager.loggerDict.values():
 
 
 """
-
 Directly from the Companion App
 - ccs-neon-001_Neon Gaze
 - ccs-neon-001_Neon Events
@@ -40,8 +39,8 @@ Fixation Streamer
 - fixations
 """
 
-
-
+DEBUG_MODE = True
+PLOT_UNFOLD_LOCALLY = True
 
 # These three are not used, but could allow for sending data from YouQuantified to the Flask Server via POST
 def example_post_event_handler():
@@ -57,7 +56,7 @@ def example_init_function():
 
 
 data_queue = Queue()
-unfold_analyzer = UnfoldAnalyzer(data_queue)
+unfold_analyzer = UnfoldAnalyzer(data_queue, PLOT_UNFOLD_LOCALLY)
 unfold_analyzer.init_julia()
 
 
@@ -97,26 +96,30 @@ if __name__ == "__main__":
 
     #Requires SurfaceGaze_0 and Fixations
     #Creates Saccades = [saccade_amplitude]
-    saccade_streamer = SaccadeStreamer(callback=saccade_event, random_amplitude=False,amplitude_method="angle") #angle or surface
+    saccade_streamer = SaccadeStreamer(callback=saccade_event, amplitude_method="angle") #angle or surface
     saccade_streamer.initialize()
     if saccade_streamer.connected:
         saccade_streamer.start()
     
 
-    #Replaying from xdf
-    fake_eeg_streamer = FakeEEGStreamer()
-    fake_eeg_streamer.initialize()
-    if fake_eeg_streamer.connected:
-        fake_eeg_streamer.start()
+    if(DEBUG_MODE):
+        #Replaying from xdf
+        fake_eeg_streamer = FakeEEGStreamer()
+        fake_eeg_streamer.initialize()
+        if fake_eeg_streamer.connected:
+            fake_eeg_streamer.start()
+    else:
+        #Using real device
+        fake_eeg_streamer = EEGStreamer()
+        fake_eeg_streamer.initialize()
+        if fake_eeg_streamer.connected:
+            fake_eeg_streamer.start()
+        print("eeg_streamer started")
 
-    #Using real device
-    #fake_eeg_streamer = EEGStreamer()
-    #fake_eeg_streamer.initialize()
-    #if fake_eeg_streamer.connected:
-    #    fake_eeg_streamer.start()
-    #print("eeg_streamer started")
 
-    unfold_analyzer.initialize()
+
+
+    unfold_analyzer.initialize(DEBUG_MODE)
     if unfold_analyzer.connected:
         print("Started")
         unfold_analyzer.start()
@@ -130,9 +133,14 @@ if __name__ == "__main__":
             if(unfold_analyzer.data_ready):
                 unfold_analyzer.data_ready = False
                 print("Data ready")
+                #threading.Thread(target=unfold_analyzer.live_fit_and_plot(), daemon=True).start()
                 unfold_analyzer.live_fit_and_plot()
                 
             time.sleep(0.1)  # Adjust for real-time monitoring
     except KeyboardInterrupt:
         print("Shutting down all services.")
+
+
+
+
 

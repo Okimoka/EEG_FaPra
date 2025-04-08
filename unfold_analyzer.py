@@ -1,4 +1,5 @@
 #from pupil_labs.real_time_screen_gaze import marker_generator
+import random
 from matplotlib import pyplot as plt
 import numpy as np
 import threading
@@ -15,13 +16,16 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 
 from lsl_stream import LSLStream
+from streamer import Streamer
+from live_visualization import Plotter
 
 
-
-class UnfoldAnalyzer:
-    def __init__(self, data_queue):
-        self.connected = False
-        self.latest_timestamp = 0
+class UnfoldAnalyzer(Streamer, Plotter):
+    def __init__(self, data_queue, PLOT_UNFOLD_LOCALLY):
+        self.plot_unfold_locally = PLOT_UNFOLD_LOCALLY
+        self.data_buffer = None #Just for plotting
+        Streamer.__init__(self)
+        Plotter.__init__(self, draw_plot=self.plot_unfold_locally, data_buffer=self.data_buffer)
         self.window = [-0.2, 0.8]
         self.saccade_history = []
         self.saccade_amplitude_history = []
@@ -29,6 +33,7 @@ class UnfoldAnalyzer:
         self.first_timestamps = []
         self.data_ready = False
         self.data_queue = data_queue
+        
 
 
     def init_julia(self):
@@ -44,33 +49,49 @@ class UnfoldAnalyzer:
             print("Using package " + package)
             jl.seval("using "+package)
 
-    def initialize(self):
+    def initialize(self, DEBUG_MODE):
+        if(DEBUG_MODE):
+            super().initialize("FakeEEG", "ccs-neon-001_Neon Gaze", None)
+        else:
+            super().initialize("UnicornEEG_Filtered", "ccs-neon-001_Neon Gaze", None)
+
+        """
+        if(PLOT_UNFOLD_LOCALLY):
+            self.data_ready = False
+            self.x_data = []
+            self.y_data = []
+            self.y_data2 = []
+
+            plt.ion()  # Turn on interactive mode
+            self.fig, self.ax = plt.subplots()
+            self.line, = self.ax.plot([], [], 'b-')  # Blue line
+            #self.ax.set_xlim(0, 10)
+            #self.ax.set_ylim(-1, 1)
+
+            self.lock = threading.Lock()
+        """
 
         #self.fixations_stream = LSLStream("Fixations", track_history_seconds=3.0) #binary fixation
-        #self.eeg_stream = LSLStream("UnicornEEG_Filtered", track_history_seconds=3.0) #8 channel eeg data
-        self.eeg_stream = LSLStream("FakeEEG", track_history_seconds=3.0) #8 channel eeg data
+        #self.input_stream_1 = LSLStream("UnicornEEG_Filtered", track_history_seconds=3.0) #8 channel eeg data
+        ###self.input_stream_1 = LSLStream("FakeEEG", track_history_seconds=3.0) #8 channel eeg data
         #self.saccade_stream = LSLStream("Saccades", track_history_seconds=3.0) #most recent saccade amplitude
-        self.pupil_stream = LSLStream("ccs-neon-001_Neon Gaze", track_history_seconds=3.0) #pupil size
+        ###self.pupil_stream = LSLStream("ccs-neon-001_Neon Gaze", track_history_seconds=3.0) #pupil size
 
-        self.outlet = StreamOutlet(StreamInfo('Unfold', 'Markers', 2, 20, 'float32', 'fixation_outlet'))
+        ###self.outlet = StreamOutlet(StreamInfo('Unfold', 'Markers', 2, 20, 'float32', 'fixation_outlet'))
 
-        #self.connected = self.fixations_stream.connected and self.eeg_stream.connected and self.saccade_stream.connected
-        self.connected = self.eeg_stream.connected
+        #self.connected = self.fixations_stream.connected and self.input_stream_1.connected and self.saccade_stream.connected
+        ###self.connected = self.input_stream_1.connected
 
-
-    
-    def lsl_pull_thread(self, stream, label):
-        while True:
-            ts, sample = stream.pull_sample()
-            if(int(time.time() - ts) > 0):
-                print(f"[{label}] Lag:", int(time.time() - ts))
-            time.sleep(0.001)
 
 
     def start(self):
+        Streamer.start(self, pull_1=True, print_lag_1=True)
+
+        if(self.plot_unfold_locally):
+            Plotter.start(self)
         # All pulls need to be in separate threads, or else we get drifting timestamps
         #threading.Thread(target=self.lsl_pull_thread, args=(self.fixations_stream, "Gaze    "), daemon=True).start()
-        threading.Thread(target=self.lsl_pull_thread, args=(self.eeg_stream, "EEG     "), daemon=True).start()
+        ###threading.Thread(target=self.lsl_pull_thread, args=(self.input_stream_1, "EEG     "), daemon=True).start()
         #threading.Thread(target=self.lsl_pull_thread, args=(self.saccade_stream, "Saccades"), daemon=True).start()
     
 
@@ -90,7 +111,7 @@ class UnfoldAnalyzer:
             ]
 
         # Extract data within time window
-        eeg_window = extract_window(self.eeg_stream)
+        eeg_window = extract_window(self.input_stream_1)
         #fixations_window = extract_window(self.fixations_stream)
         #saccades_window = extract_window(self.saccade_stream)
 
@@ -98,9 +119,17 @@ class UnfoldAnalyzer:
             print("No data in window")
             return
 
-        print("len(samples) (3s), len(samples) (windowlength), newest timestamp - currenttime, oldest time - currenttime")
-        current_time = time.time()
-        print(str(len(eeg_window)) + "  " + str(len(self.eeg_stream.history)) + "  " + str(max([sample[0] for sample in self.eeg_stream.history])-current_time) + "  " + str(min([sample[0] for sample in self.eeg_stream.history])-current_time))
+        print_start_time = min(sample[0] for sample in eeg_window) - time.time() + self.window[1] # add window[1] for both since we waited window[1] seconds
+        print_end_time = max(sample[0] for sample in eeg_window) - time.time() + self.window[1]
+        print_variance = np.var([sample[1] for sample in eeg_window], axis=0).astype(int)
+
+        print(f"Captured {len(eeg_window)} samples between {print_start_time:.2f} and {print_end_time:.2f} with variance {print_variance.tolist()}")
+
+        #print("Captured " + str(len(eeg_window)) + " samples between " + str(min([sample[0] for sample in eeg_window])-time.time()) + " and " + str(max([sample[0] for sample in eeg_window])-time.time()) + " with variance " + str(np.var([sample[1] for sample in eeg_window], axis=0)))
+        print("Random sample in window: " + str(random.choice(eeg_window)))
+        #print("len(samples) (3s), len(samples) (windowlength), newest timestamp - currenttime, oldest time - currenttime")
+        #current_time = time.time()
+        #print(str(len(eeg_window)) + "  " + str(len(self.input_stream_1.history)) + "  " + str(max([sample[0] for sample in self.input_stream_1.history])-current_time) + "  " + str(min([sample[0] for sample in self.input_stream_1.history])-current_time))
         print("--------------------------")
 
         self.saccade_history.append([eeg_window, amplitude])
@@ -152,6 +181,7 @@ class UnfoldAnalyzer:
     #    plt.show()
 
     def live_fit_and_plot(self):
+
         eeg_data = self.get_latest_eeg_epochs()  # (n_channels, n_times, n_epochs)
         metadata = self.get_latest_fixation_metadata()  # DataFrame with saccade_amplitude
 
@@ -176,8 +206,26 @@ class UnfoldAnalyzer:
             'time': results_jl.time
         })
 
+        #    channel           coefname   estimate  time
+        #0           1        (Intercept)  -0.055425  -0.2
+        #1           2        (Intercept)  -0.371453  -0.2
+        #2           3        (Intercept)  -0.257530  -0.2
+        #3           4        (Intercept)  -0.603811  -0.2
+        #4           5        (Intercept)  -0.462772  -0.2
+        #...       ...                ...        ...   ...
+        #3547        4  saccade_amplitude   1.134658   0.8
+        #3548        5  saccade_amplitude   9.985816   0.8
+        #3549        6  saccade_amplitude  14.477165   0.8
+        #3550        7  saccade_amplitude   4.530100   0.8
+        #3551        8  saccade_amplitude   2.348762   0.8
+
         #print(results_py)
-        self.emit_model_results_to_js(results_py, 1)
+        #channels: 2, 6,
+        if(self.plot_unfold_locally):
+            self.data_buffer = results_py[results_py.channel == 2]
+            #self.plot_channel(results_py, 1)
+        else:
+            self.emit_model_results_to_js(results_py, 1)
         
 
     def emit_model_results_to_js(self, results_py, channel_id):
@@ -200,3 +248,16 @@ class UnfoldAnalyzer:
         #data queue of the flask websocket
         self.data_queue.put(payload)
 
+    #def plot_channel(self, results_py, channel_id):
+
+
+    def update_plot(self):
+        self.line.set_xdata(self.x_data)
+        self.line.set_ydata(self.y_data)
+
+        # Update plot limits dynamically if needed
+        self.ax.relim()
+        self.ax.autoscale_view()
+
+        self.fig.canvas.draw()
+        self.fig.canvas.flush_events()

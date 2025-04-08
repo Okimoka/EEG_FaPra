@@ -4,7 +4,7 @@ import threading
 import time
 from pylsl import StreamInfo, StreamOutlet, local_clock
 from lsl_stream import LSLStream
-
+from streamer import Streamer
 
 """
 Requires LSL stream UnicornEEG_Filtered
@@ -15,29 +15,25 @@ When re-streaming, they are "corrected" to be the current time
 
 """
 
-class FakeEEGStreamer:
+class FakeEEGStreamer(Streamer):
     def __init__(self):
-        self.connected = False
-        self.latest_timestamp = 0
+        super().__init__()
 
-    def lsl_pull_thread(self, stream):
+
+    def lsl_pull_thread(self, stream, _): #dont need print_lag 
         while True:
-            timestamp, sample = stream.pull_sample()
+            timestamps, samples = stream.pull_chunk()
+            if(samples[0] == [0]):
+                continue
 
-            self.outlet.push_sample(sample, time.time())
-            self.latest_timestamp = time.time()
-            time.sleep(1/250)
-        
+            for ts, sample in zip(timestamps, samples):
+                self.outlet.push_sample(sample, time.time())
+                self.latest_timestamp = time.time()
+
+            time.sleep(1/self.sampling_rate)
+
     def initialize(self):
-        self.eeg_stream = LSLStream("UnicornEEG_Filtered", track_history_seconds=3.0)
-        self.outlet = StreamOutlet(StreamInfo('FakeEEG', 'Markers', 8, 250, 'float32', 'fakeeeg_outlet'))
-        self.connected = self.eeg_stream.connected
+        super().initialize("UnicornEEG_Filtered", None, StreamOutlet(StreamInfo('FakeEEG', 'EEG', 8, 250, 'float32', 'fakeeeg_outlet')))
 
     def start(self):
-        self._start_lsl_thread()
-
-    def _start_lsl_thread(self):
-        self.pull_thread = threading.Thread(target=self.lsl_pull_thread, args=(self.eeg_stream,))
-        self.pull_thread.daemon = True
-        self.pull_thread.start()
-
+        super().start(pull_1=True)

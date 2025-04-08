@@ -10,7 +10,9 @@ from lsl_stream import LSLStream
 import datetime
 import sys
 import multiprocessing
-
+from helpers import _calculate_gaze_angles, fixation_detection_idt, DataBuffer
+from streamer import Streamer
+from live_visualization import Plotter
 
 """
 Requires an LSL stream "ccs-neon-001_Neon Gaze" (produced directly from the Neon Companion app)
@@ -20,176 +22,46 @@ Produces:
 """
 
 
-#fixation_detection_idt and _calculate_gaze_angles are taken directly from the PhysioLabXR GitHub: 
-#https://github.com/PhysioLabXR/PhysioLabXR-Community/blob/ffb75e1b43625806689bb96cbd90f3645948e1b7/physiolabxr/scripting/physio/eyetracking.py#L77
-def _calculate_gaze_angles(gaze_vector):
-    """
-    gaze vectors should be 3D vectors in the eye coordinate system, with the z axis pointing out of the eye straight ahead
-    @param gaze_vector:
-    @param head_rotation_xy_degree:
-    @return:
-    """
-    reference_vector = np.array([0, 0, 1])
-    dot_products = np.dot(gaze_vector.T, reference_vector)
-    magnitudes = np.linalg.norm(gaze_vector, axis=0)
-    reference_magnitude = np.linalg.norm(reference_vector)
-    cosine_angles = dot_products / (magnitudes * reference_magnitude)
-    angles_rad = np.arccos(cosine_angles)
-    angles_deg = np.degrees(angles_rad)
 
-    return angles_deg
-
-
-def fixation_detection_idt(gaze_xyz, timestamps, window_size=0.175, dispersion_threshold_degree=0.5, saccade_min_sample=2, return_last_window_start=False):
-    """
-
-    @param gaze_xyz:
-    @param timestamps:
-    @param window_size:
-    @param dispersion_threshold_degree:
-    @param saccade_min_sample: the minimal number of samples between consecutive fixations to be considered as a saccade
-    @return:
-    """
-
-    try:
-
-        assert window_size > 0, "fixation_detection_idt: window size must be positive"
-        gaze_angles_degree = _calculate_gaze_angles(gaze_xyz)
-        windows = [(i, np.argmin(np.abs(timestamps - (t + window_size)))) for i, t in enumerate(timestamps)]
-
-
-        last_window_start = 0
-        fixations = []
-        for start, end in windows:
-            if end >= len(timestamps):
-                break
-            if end - start < saccade_min_sample:
-                continue
-            center_time = timestamps[start] + window_size / 2
-            if np.std(gaze_angles_degree[start:end]) < dispersion_threshold_degree:
-                fixations.append([1, center_time])  # 1 for fixation
-            else:
-                fixations.append([0, center_time])
-            last_window_start = start
-        if return_last_window_start:
-            return np.array(fixations).T, last_window_start
-        else:
-            return np.array(fixations).T
-    except Exception as e:
-        print(e)
-        return None
-
-
-# Constantly supplies the stream object with a recent chunk of samples (from the "ccs-neon-001_Neon Gaze" stream)
-def lsl_pull_thread(stream):
-    while True:
-        stream.pull_chunk()
-        time.sleep(0.001)
-
-
-# Helper class for the real-time plot
-# The LSL streams of Pupil devices use "Pupil Time" for their timestamps. Since we use Unix timestamps for everything else, we adjust using an offset
-# This is the methodology described in https://docs.pupil-labs.com/core/developer/#convert-pupil-time-to-system-time
-# The buffer also automatically only keeps the most recent 2000 samples to plot
-class DataBuffer:
-    def __init__(self):
-        self.gaze_angles_buffer = []
-        self.gaze_angles_timestamps = []
-        self.gaze_angles_time_offset = 0
-        self.fixations_buffer = []
-        self.fixations_timestamps = []
-        self.fixations_time_offset = 0
-
-    def update_gaze_data(self, timestamps, gaze_angles):
-        if self.gaze_angles_time_offset == 0:
-            self.gaze_angles_time_offset = time.time() - timestamps[0]
-        self.gaze_angles_timestamps += timestamps
-        self.gaze_angles_buffer += gaze_angles
-        self.trim_buffers()
-
-    def update_fixation_data(self, timestamps, fixations):
-        #resync for when replaying from .xdf file
-        #causes timestamps to get out of order
-        if self.fixations_time_offset == 0 or (timestamps[0] + self.fixations_time_offset - time.time()) < -0.5:
-            self.fixations_time_offset = time.time() - timestamps[0]
-        self.fixations_timestamps += timestamps
-        self.fixations_buffer += [20 if x == 1 else 0 for x in fixations]
-        self.trim_buffers()
-
-    def trim_buffers(self):
-        if len(self.gaze_angles_timestamps) > 2000:
-            self.gaze_angles_timestamps = self.gaze_angles_timestamps[-2000:]
-            self.gaze_angles_buffer = self.gaze_angles_buffer[-2000:]
-        if len(self.fixations_timestamps) > 2000:
-            self.fixations_timestamps = self.fixations_timestamps[-2000:]
-            self.fixations_buffer = self.fixations_buffer[-2000:]
-
-
-# Using matplotlibs "FuncAnimation" to produce a real-time plot.
-# The construct using queues is needed because this needs to run in a subprocess in order to be non-blocking (thread does not work)
-def run_plotting(queue):
-    def update_plot(frame):
-        while not queue.empty():
-            data_buffer = queue.get()
-            ax.clear()
-            ax.plot(data_buffer.gaze_angles_timestamps, data_buffer.gaze_angles_buffer, label='Data Line')
-            ax.plot(data_buffer.fixations_timestamps, data_buffer.fixations_buffer, label='Fixation')
-            ax.legend(loc='upper left')
-            plt.xlabel('X values')
-            plt.ylabel('Y values')
-            plt.title('Real-time plot of X and Y values')
-
-    fig, ax = plt.subplots()
-    ani = FuncAnimation(fig, update_plot, interval=20)
-    plt.show()
-
-
-
-
-class FixationsStreamer:
-    def __init__(self, draw_plot=False):
-        self.draw_plot = draw_plot
-        self.connected = False
-        self.latest_timestamp = 0
-        # These two are just for plotting
-        self.queue = multiprocessing.Queue()
+class FixationsStreamer(Streamer, Plotter):
+    def __init__(self, draw_plot=False, **kwargs):
         self.data_buffer = DataBuffer()
+        #super().__init__(draw_plot=draw_plot, data_buffer=self.data_buffer)
+        Streamer.__init__(self)
+        Plotter.__init__(self, draw_plot=draw_plot, data_buffer=self.data_buffer)
 
-    # Again, for allowing communication with the subprocess
-    def _handle_queue_updates(self):
-        while True:
-            if self.data_buffer:
-                self.queue.put(self.data_buffer)
-                time.sleep(0.05)
+
 
     def initialize(self):
-        self.lsl_stream = LSLStream("ccs-neon-001_Neon Gaze", track_history_seconds=3.0)
-        self.outlet = StreamOutlet(StreamInfo('Fixations', 'Markers', 2, 20, 'float32', 'fixation_outlet'))
-        self.connected = self.lsl_stream.connected
+        super().initialize("ccs-neon-001_Neon Gaze", None, StreamOutlet(StreamInfo('Fixations', 'Markers', 2, 20, 'float32', 'fixation_outlet')))
 
     # We need one thread to fill the buffer constantly using the LSL stream from the Neon Companion app (pull_thread)
     # The other thread (process_thread) will process the data in the buffer and push the fixations to the outlet
     def start(self):
         #pull thread
-        threading.Thread(target=lsl_pull_thread, args=(self.lsl_stream,), daemon=True).start()
+        ###super().start(pull_1=True, label_1="Gaze    ")
+        #super().start(pull_1=True, print_lag_1=True)
+        Streamer.start(self, pull_1=True, print_lag_1=True)
+        Plotter.start(self)
         #push thread
-        threading.Thread(target=self.process_thread, args=(self.lsl_stream, self.outlet, self.data_buffer), daemon=True).start()
+        threading.Thread(target=self.process_thread, args=(self.input_stream_1, self.outlet, self.data_buffer), daemon=True).start()
 
 
-        if self.draw_plot:
-            self.plot_process = multiprocessing.Process(target=run_plotting, args=(self.queue,))
-            self.plot_process.start()
-            self.queue_thread = threading.Thread(target=self._handle_queue_updates)
-            self.queue_thread.daemon = True
-            self.queue_thread.start()
 
-
-    def process_thread(self, lsl_stream, outlet, data_buffer):
+    def process_thread(self, lsl_stream, outlet, data_buffer, cooldown_time=0.3):
         process_interval = 1.0 / 20  # 20 times per second, example on physio website was 30
+        last_saccade_end_time = None
+        last_fixation_state = 1
         while True:
             time.sleep(process_interval)
             buffer = lsl_stream.history
             if buffer:
+                if(len(lsl_stream.history) != None and last_saccade_end_time != None and len(lsl_stream.history)>0 and lsl_stream.history[-1][0] < last_saccade_end_time):
+                    print("Detected loop in fixation data, resetting Fixations variables")
+                    last_saccade_end_time = None
+                    last_fixation_state = 1
+                    #continue
+
                 #Closely follows the usage of idt from https://physiolabxrdocs.readthedocs.io/en/latest/FixationDetection.html
                 timestamps = np.array([item[0] for item in buffer])
                 gaze_xyz = np.array([item[1] for item in buffer])
@@ -200,16 +72,23 @@ class FixationsStreamer:
 
                 # Parameters have been tuned from the defaults. Can still be improved
                 fixations, last_window_start = fixation_detection_idt(gaze_xyz.T, timestamps, 0.175, 1.2, 2, True)
-                
-                # Has just happened once for unknown reason
-                if(fixations is None or len(fixations) < 2):
-                    print("Warning: Fixations is None or less than 2")
-                    print(buffer)
-                    print(gaze_xyz.T)
-                    print(fixations)
-                    continue
-                    
                 lsl_stream.clear_history_to_index(last_window_start)
+
+
+
+                for i, (timestamp, state) in enumerate(zip(timestamps, fixations[0])):
+                    if(state == 0):
+                        if last_saccade_end_time is not None and (timestamp < last_saccade_end_time + cooldown_time):
+                            fixations[0][i] = 1
+                
+                #for i, (timestamp, state) in enumerate(zip(timestamps, fixations[0])):
+                    if(state == 1 and last_fixation_state == 0): # Exiting saccade
+                        last_saccade_end_time = timestamp
+                
+                    last_fixation_state = state
+
+
+
                 data_buffer.update_fixation_data(list(fixations[1]), fixations[0])
 
                 timestamps = [timestamp + data_buffer.fixations_time_offset for timestamp in timestamps]

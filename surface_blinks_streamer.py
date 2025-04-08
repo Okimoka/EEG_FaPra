@@ -1,6 +1,6 @@
 from pupil_labs.realtime_api.simple import discover_one_device
 from pupil_labs.real_time_screen_gaze.gaze_mapper import GazeMapper
-from pylsl import StreamInfo, StreamInlet, StreamOutlet, resolve_stream
+from pylsl import StreamInfo, StreamInlet, StreamOutlet, resolve_byprop
 import random
 
 import time
@@ -20,6 +20,8 @@ import threading
 import queue
 import time
 
+from streamer import Streamer
+
 
 """
 Requires connection to the Neon Companion App
@@ -29,10 +31,9 @@ blink_count is the amount of blinks since the stream is running
 """
 
 
-class SurfaceBlinksStreamer:
+class SurfaceBlinksStreamer(Streamer):
     def __init__(self):
-        self.connected = False
-        self.latest_timestamp = 0
+        super().__init__()
         self.blink_queue = queue.Queue()
         self.device = None
         self.gaze_mapper = None

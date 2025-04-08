@@ -9,6 +9,10 @@ class LSLStream:
         self.track_history_seconds = track_history_seconds
         self.connected = False
 
+        if(name == None):
+            self.connected = True
+            return
+
         if(name in [stream.name() for stream in resolve_streams()]):
             self.inlet = StreamInlet(resolve_byprop('name', name)[0])
             print("Connected to stream: " + name)
@@ -47,16 +51,9 @@ class LSLStream:
                     self.history.pop(0)
                 
                 return timestamp, sample
-
-
         else:
             #print("Stream "+ self.name +" is not sending data!")
             return (0,[0])
-        #except Exception as e:
-        #    #print(e) Todo
-        #    print("Warning: Pulling sample from "+ self.name +" failed")
-        #    print(e)
-        #    return (0,[0])
     
     #Pulling chunks should be more efficient
     def pull_chunk(self):
@@ -75,9 +72,9 @@ class LSLStream:
                 return timestamps, chunk
             else:
                 #print("Stream "+ self.name +" is not sending data!")
-                return ([0],[[0]])
+                return ([],[[]])
         except Exception as e:
             #print(e) Todo
             print("Warning: Pulling chunk from "+ self.name +" failed")
-            return ([0],[[0]])
+            return ([],[[]])
 
