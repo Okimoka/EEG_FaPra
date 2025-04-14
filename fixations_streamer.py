@@ -65,7 +65,10 @@ class FixationsStreamer(Streamer, Plotter):
                 # Parameters have been tuned from the defaults, but can still be improved
                 fixations, last_window_start = fixation_detection_idt(gaze_xyz.T, timestamps, 0.175, 1.2, 2, True)
                 lsl_stream.clear_history_to_index(last_window_start)
-
+				
+                if(len(fixations) == 0):
+                    continue
+				
                 # Sometimes saccades are registered multiple times in quick succession, even though it should be just one. E.g. when blinking
                 # To mitigate this, any new saccades are blocked from starting until a specified cooldown is over
                 for i, (timestamp, state) in enumerate(zip(timestamps, fixations[0])):

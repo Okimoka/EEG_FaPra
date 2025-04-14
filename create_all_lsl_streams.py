@@ -21,8 +21,9 @@ for logger in logging.Logger.manager.loggerDict.values():
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--debug', type=bool, default=False, help='When replaying from .xdf')
-parser.add_argument('--plot-gaze', type=bool, default=False, help='Live plot of the gaze angles and fixation state')
-parser.add_argument('--plot-unfold', type=bool, default=False, help='Live plot of the Unfold.jl model results')
+parser.add_argument('--plot-gaze', type=bool, default=True, help='Live plot of the gaze angles and fixation state')
+# If this is on, the Unfold.jl plot will be drawn locally using matplotlib. If not, it will be sent via websocket to YouQuantified
+parser.add_argument('--plot-unfold', type=bool, default=True, help='Live plot of the Unfold.jl model results')
 #parser.add_argument('--plot-eeg', type=bool, default=False, help='Live plot of the eeg channels') TODO
 args = parser.parse_args()
 
@@ -49,7 +50,7 @@ if __name__ == "__main__":
     flask_process = Process(target=start_flask_server, args=(unfold_results_queue,))
     flask_process.start()
 
-    fixations_streamer = FixationsStreamer(draw_plot=True)
+    fixations_streamer = FixationsStreamer(draw_plot=args.plot_gaze)
     fixations_streamer.initialize()
     if fixations_streamer.connected:
         fixations_streamer.start()
@@ -61,13 +62,7 @@ if __name__ == "__main__":
         if surface_blinks_streamer.connected:
             surface_blinks_streamer.start()
 
-
-    def saccade_event(amplitude):
-        if(unfold_analyzer.connected):
-            unfold_analyzer.add_saccade(amplitude)
-
-
-    saccade_streamer = SaccadeStreamer(callback=saccade_event, amplitude_method="angle") #angle or surface
+    saccade_streamer = SaccadeStreamer(callback_object=unfold_analyzer, amplitude_method="angle") #angle or surface
     saccade_streamer.initialize()
     if saccade_streamer.connected:
         saccade_streamer.start()
@@ -79,7 +74,7 @@ if __name__ == "__main__":
         eeg_streamer.start()
 
 
-    unfold_analyzer.initialize(args.debug)
+    unfold_analyzer.initialize()
     if unfold_analyzer.connected:
         unfold_analyzer.start()
 
@@ -88,12 +83,8 @@ if __name__ == "__main__":
         while True:
             if(unfold_analyzer.data_ready):
                 unfold_analyzer.data_ready = False
-                unfold_analyzer.live_fit_and_plot() # Putting this in a thread unfortunately does not work. Subprocess probably works
+                # Putting this in a thread unfortunately does not help removing the long delay for the first trial. Subprocess probably works
+                unfold_analyzer.live_fit_and_plot() 
             time.sleep(0.1)
     except KeyboardInterrupt:
         print("Shutting down all services.")
-
-
-
-
-

@@ -9,7 +9,7 @@ from helpers import RingBuffer, create_bandpass_filter, apply_filter, create_ban
 #logging.basicConfig(level=logging.DEBUG)
 
 QUANTILE = 0.05
-BUFFERSIZE = 500 # in seconds
+BUFFERSIZE = 50 # in seconds
 LOWCUT = 2 # in Hz
 HIGHCUT = 70 # in Hz
 NOTCHFREQ = 50 # in Hz

@@ -24,9 +24,9 @@ Produces Saccades LSL stream, which is just a single channel of the amplitude of
 
 
 class SaccadeStreamer(Streamer):
-    def __init__(self, callback, amplitude_method="surface"):
+    def __init__(self, callback_object, amplitude_method="surface"):
         super().__init__()
-        self.callback = callback
+        self.callback_object = callback_object
         self.amplitude_method = amplitude_method
         
     def initialize(self):
@@ -81,8 +81,11 @@ class SaccadeStreamer(Streamer):
                 surface_sample = min(self.input_stream_2.history, key=lambda s: abs(s[0] - fixation_timestamp), default=None)
                 if surface_sample is None:
                     continue  # No surface sample yet
+                    
+                current_position = surface_sample[1][:2] #x,y of most recent sample
 
                 if last_fixation_state is not None:
+					
                     # Saccade starts
                     if last_fixation_state == 1 and current_fixation_state == 0:
                         saccade_start_position = last_position #only relevant for surface
@@ -91,7 +94,7 @@ class SaccadeStreamer(Streamer):
                     # Saccade Ends, calculate amplitude
                     elif last_fixation_state == 0 and current_fixation_state == 1 and saccade_start_position is not None:
                         if(self.amplitude_method == "surface"):
-                            current_position = surface_sample[1][:2] #x,y of most recent sample
+                            
                             dx = current_position[0] - saccade_start_position[0]
                             dy = current_position[1] - saccade_start_position[1]
                             last_amplitude = np.sqrt(dx ** 2 + dy ** 2)
@@ -103,12 +106,18 @@ class SaccadeStreamer(Streamer):
                             #trim surface_stream_history to the saccade window
                             surface_stream_history = [sample for sample in self.input_stream_2.history if sample[0] > saccade_window[0] and sample[0] < saccade_window[1]]
 
-                            timestamps, samples = zip(surface_stream_history) #Convert [(ts,sample),(ts,sample),...] to [(ts, ts, ..), (sample, sample, ...)]
+                            if(len(surface_stream_history) == 0):
+                                print("Warning! angle stream history is empty")
+                                continue
+							
+                            timestamps, samples = zip(*surface_stream_history) #Convert [(ts,sample),(ts,sample),...] to [(ts, ts, ..), (sample, sample, ...)]
                             angles = [sample[1] for sample in samples]
     
                             last_amplitude = max(angles) - min(angles)
                         
-                        self.callback(last_amplitude)
+                        # callback_object is the UnfoldAnalyzer
+                        if(self.callback_object.connected):
+                            self.callback_object.add_saccade(last_amplitude)
 
 
                 self.latest_timestamp = time.time()
