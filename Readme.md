@@ -47,7 +47,8 @@ The sample streams can be replayed into persistent live-streams by running `pyth
 * 'm' : enables/disables the mirror effect
 * '+' : adds one to the symmetry
 * '-' : subtracts on of the symmetry
-* 'r' : random symmetry
+* 'c' : switch to next color palette
+* 'r' : random symmetry and color palette
 
 # EEG Stream
 The basic ordering of the powerchannels is delta, theta, alpha, beta (which can be changed). The basic order of the EEG channels is the same as in the unicorn device.
