@@ -20,13 +20,27 @@ The repository was tested on Ubuntu 23.10 and 24.04 on python 3.12.3. Steps for 
 - Switch into "eegenv" `source eegenv/bin/activate`
 - Install all required packages `pip3 install -r requirements.txt`
 
+- Download [real-time-screen-gaze](https://github.com/pupil-labs/real-time-screen-gaze) and place the `pupil_labs` folder into the root directory
+
+- Download [real-time-blink-detection](https://github.com/pupil-labs/real-time-blink-detection/) and place the `blink_detector` folder into the root directory
+
 First execution of the program will take a long time, as it will download julia and some julia packages (no manual installation of julia needed)
 
 # Running the Project
-- run `create_all_lsl_streams.py`
-- run `main.py` in LSLWebsocketMirror
+- run `python3 create_all_lsl_streams.py`
+- run `python3 main.py` in LSLWebsocketMirror
 - visit youquantified.com
 - TODO list the necessary steps to run the project (start multiple scripts, go to You:Quantified, enter Streams etc)
+
+# Debugging
+To test the functionality of the code without any actual devices, LSL streams can be streamed from an `.xdf` file. Only the connection to the Eyetracker via `discover_one_device()` cannot be simulated.
+There are two sample `.xdf` files that were recorded using [LabRecorder](https://github.com/labstreaminglayer/App-LabRecorder/tree/master), with the following gaze patterns:
+
+[TODO Gif1+Desc1]
+[TODO Gif2+Desc1]
+
+The sample streams can be replayed into persistent live-streams by running `python3 samplestream_all.py`. To tell the main program that it's using simulated data, it has to be run using the `--debug` parameter, i.e. `python3 create_all_lsl_streams.py --debug=True`
+
 
 # Controls in You:Quantified
 * ' ' (space) : pauses/unpauses the demonstration
